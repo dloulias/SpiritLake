@@ -21,12 +21,9 @@ typedef struct {
 #include <SD.h>
 #include <ctype.h>
 #include <DS3232RTC.h>        //http://github.com/JChristensen/DS3232RTC
-#include <Streaming.h>        //http://arduiniana.org/libraries/streaming/
 #include <Time.h>             //http://playground.arduino.cc/Code/Time
 #include <Wire.h>             //http://arduino.cc/en/Reference/Wire
 #include <SDI12.h>
-#include <SPI.h>
-#include <SD.h>
 
 #define DATAPIN 10
 #define CHIPSELECT 53
@@ -46,22 +43,32 @@ void setup() {
 
   // Begin serial display.
   Serial.begin(9600);
+  Serial.println("Setting up...");
 
   // Wait for SD card to be inserted.
   while(!SD.begin(CHIPSELECT)){
     Serial.println("Card failed.");
   }
-
+  
+  Serial.println("Card loaded.");
+  
+  Serial.println("Loading preferences...");
+  
   // Read in csv file
   if(SD.exists("preferences.csv")){
     if(!getTimes()) {
       setDefaultAlarms();  
+      Serial.println("Default times loaded.");
     }
+    else
+      Serial.println("Times loaded.");
   }
   else{
     setDefaultAlarms();
+    Serial.println("Default times loaded");
   }
-
+  
+  Serial.println("Setting up first alarm.");
   setSyncProvider(RTC.get);
   RTC.squareWave(SQWAVE_NONE);
   pinMode(ALARM_PIN, INPUT_PULLUP);
@@ -74,11 +81,31 @@ void setup() {
 }
 
 void setDefaultAlarms() {
+  alarms[0].hour = 0;
+  alarms[0].minute = 0;
+  
+  alarms[1].hour = 4;
+  alarms[1].minute = 0;
+  
+  alarms[2].hour = 4;
+  alarms[2].minute = 0;
+  
+  alarms[3].hour = 4;
+  alarms[3].minute = 0;
+  
+  alarms[4].hour = 4;
+  alarms[4].minute = 0;
+  
+  alarms[5].hour = 4;
+  alarms[5].minute = 0;
+  
+  numAlarms = 5;
   
 }
 
 
 bool getTimes() {
+  
   File timeFile = SD.open("preferences.csv", FILE_READ);
   int alarmCounter = 0;
   bool onHour = true;
@@ -89,6 +116,8 @@ bool getTimes() {
   while(timeFile.available() && alarmCounter < MAX_READINGS) {
     
     c = timeFile.read();
+    Serial.println("Character read:");
+    Serial.println(c);
 
     if(c == ':') {
       if(onHour){
@@ -103,6 +132,9 @@ bool getTimes() {
         onHour = true;
         timeAdd = "";
         alarmCounter++;
+        Serial.println("Alarm time:");
+        Serial.println(alarms[alarmCounter-1].hour);
+        Serial.println(alarms[alarmCounter-1].minute);
       }
     }
       
