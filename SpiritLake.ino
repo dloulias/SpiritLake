@@ -27,7 +27,7 @@ typedef struct {
 
 #define DATAPIN 10
 #define CHIPSELECT 53
-#define ALARM_PIN 12
+#define ALARM_PIN 2
 #define MAX_READINGS 5
 
 
@@ -36,13 +36,14 @@ AlarmTime alarms[MAX_READINGS];
 
 int numAlarms;
 int alarmCount = 0;
+boolean wasCalled = false;
 
 SDI12 mySDI12(DATAPIN);
 
 void setup() {
 
   // Begin serial display.
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Setting up...");
 
   // Wait for SD card to be inserted.
@@ -55,7 +56,8 @@ void setup() {
   Serial.println("Loading preferences...");
   
   // Read in csv file
-  if(SD.exists("preferences.csv")){
+  if(SD.exists("config.csv")){
+    Serial.println("Preferences file found.");
     if(!getTimes()) {
       setDefaultAlarms();  
       Serial.println("Default times loaded.");
@@ -65,8 +67,22 @@ void setup() {
   }
   else{
     setDefaultAlarms();
+    Serial.println("Preferences file not found.");
     Serial.println("Default times loaded");
   }
+  Serial.print("Current time: ");
+  time_t currtime = RTC.get();
+  Serial.print(month(currtime));
+  Serial.print("/");
+  Serial.print(day(currtime));
+  Serial.print("/");
+  Serial.print(year(currtime));
+  Serial.print(" ");
+  Serial.print(hour(currtime));
+  Serial.print(":");
+  Serial.print(minute(currtime));
+  Serial.print(":");
+  Serial.println(second(currtime));
   
   Serial.println("Setting up first alarm.");
   setSyncProvider(RTC.get);
@@ -74,11 +90,11 @@ void setup() {
   pinMode(ALARM_PIN, INPUT_PULLUP);
   attachInterrupt(INT0, alarmISR, FALLING);
 
+  delay(5000);
   setAlarmTime();
-  interrupts();
   
-
 }
+
 
 void setDefaultAlarms() {
   alarms[0].hour = 0;
@@ -106,72 +122,80 @@ void setDefaultAlarms() {
 
 bool getTimes() {
   
-  File timeFile = SD.open("preferences.csv", FILE_READ);
+  File timeFile = SD.open("config.csv", FILE_READ);
   int alarmCounter = 0;
-  bool onHour = true;
   char c;
   String timeAdd = "";
   bool returnBool = true;
 
+  
+
   while(timeFile.available() && alarmCounter < MAX_READINGS) {
     
     c = timeFile.read();
-    Serial.println("Character read:");
     Serial.println(c);
-
     if(c == ':') {
-      if(onHour){
-        alarms[alarmCounter].hour = timeAdd.toInt();
-        
-        onHour = false;
-        timeAdd = "";
-      }
-      else {
-        alarms[alarmCounter].minute = timeAdd.toInt();
-
-        onHour = true;
-        timeAdd = "";
-        alarmCounter++;
-        Serial.println("Alarm time:");
-        Serial.println(alarms[alarmCounter-1].hour);
-        Serial.println(alarms[alarmCounter-1].minute);
-      }
+      alarms[alarmCounter].hour = timeAdd.toInt();
+      timeAdd = "";
     }
-      
     else if(isdigit(c)){
       timeAdd += c;
     }
+    else if(c == '\n') {
+      alarms[alarmCounter].minute = timeAdd.toInt();
+      timeAdd = "";
+      alarmCounter++;
+    }
     else {
-      returnBool = false;
+      if(c != '\r') {
+        returnBool = false;
+        break;
+      }
     }
 
   }
 
-  numAlarms = alarmCounter + 1;
+  if(isdigit(c)) {
+    alarms[alarmCounter].minute = timeAdd.toInt();
+    timeAdd = "";
+    alarmCounter++;
+  }
+  else {
+    if(c != '\r' || c != '\n') {
+      returnBool = false;
+    }
+  }
+  
+  numAlarms = alarmCounter;
+
+  for(int i = 0; i < numAlarms; i++) {
+    Serial.print(alarms[i].hour);
+    Serial.print(':');
+    Serial.println(alarms[i].minute);
+  }
   return returnBool;
   
 }
 
 void setAlarmTime() {
-  noInterrupts();
-  RTC.setAlarm(ALM2_MATCH_HOURS, 0, alarms[alarmCount].minute, alarms[alarmCount].hour, 1);
-  RTC.alarm(ALARM_2);
-  RTC.alarmInterrupt(ALARM_2, true);
+  RTC.setAlarm(ALM1_MATCH_HOURS, 0, alarms[alarmCount].minute, alarms[alarmCount].hour, 1);
+  RTC.alarm(ALARM_1);
+  RTC.alarmInterrupt(ALARM_1, true);
 }
 
 void alarmISR() {
-  noInterrupts();
-  
-  if(alarmCount == numAlarms-1){
+  //noInterrupts();
+  wasCalled = true;
+  /*if(alarmCount == numAlarms-1){
     alarmCount = 0;
   }
   else {
     alarmCount++;
-  }
+  }*/
 
-  setAlarmTime();
-  takeMeasurement();
-  interrupts();
+  //setAlarmTime();
+  //takeMeasurement();
+  //interrupts();
   
 }
 
@@ -359,7 +383,10 @@ String decodeResponse()
     return sdiResponse;
 }
 
-
 void loop() {
+  if(wasCalled) {
+    Serial.print("Alarm!");
+    wasCalled = false;
+  }
 
 }
