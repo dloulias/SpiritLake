@@ -44,6 +44,7 @@ void setup() {
 
   // Begin serial display.
   Serial.begin(115200);
+  mySDI12.begin();
   Serial.println("Setting up...");
 
   // Wait for SD card to be inserted.
@@ -90,7 +91,6 @@ void setup() {
   pinMode(ALARM_PIN, INPUT_PULLUP);
   attachInterrupt(INT0, alarmISR, FALLING);
 
-  delay(5000);
   setAlarmTime();
   
 }
@@ -183,7 +183,7 @@ void setAlarmTime() {
   Serial.print(":");
   Serial.println(alarms[alarmCount].minute);
   RTC.setAlarm(ALM1_MATCH_HOURS, 0, alarms[alarmCount].minute, alarms[alarmCount].hour, 1);
-  //RTC.setAlarm(ALM1_MATCH_HOURS, 0, 57, 13, 1);
+  //RTC.setAlarm(ALM1_MATCH_HOURS, 0, 26, 14, 1);
   RTC.alarm(ALARM_1);
   RTC.alarmInterrupt(ALARM_1, true);
 }
@@ -194,9 +194,9 @@ void alarmISR() {
 
 void takeMeasurement()
 {
-    while(!SD.begin(CHIPSELECT)){
+    /*while(!SD.begin(CHIPSELECT)){
       Serial.println("Card failed.");
-    }
+    }*/
     turnOnSensor();
     requestMeasurement();
     String data = requestData();
@@ -205,8 +205,36 @@ void takeMeasurement()
 }
 
 String parseData(String data) {
-  String toAdd = "";
   String line = "";
+  /*time_t currtime = RTC.get();
+  Serial.print(month(currtime));
+  Serial.print("/");
+  Serial.print(day(currtime));
+  Serial.print("/");
+  Serial.print(year(currtime));
+  Serial.print(" ");
+  Serial.print(hour(currtime));
+  Serial.print(":");
+  Serial.print(minute(currtime));
+  Serial.print(":");
+  Serial.println(second(currtime));*/
+
+  time_t currtime = RTC.get();
+  line += month(currtime);
+  line += "/";
+  line += day(currtime);
+  line += "/";
+  line += year(currtime);
+  line += ",";
+  line += hour(currtime);
+  line += ":";
+  if(minute(currtime) < 10)
+    line += "0";
+  line += minute(currtime);
+  line += ",";
+  
+  String toAdd = "";
+  
   Serial.println("Writing to SD card...");
   
   if(data.charAt(1) == '-')
@@ -219,6 +247,11 @@ String parseData(String data) {
     if(c == '+') {
       line += toAdd;
       line += ",";
+      toAdd = "";
+    }
+    else if(c == '-') {
+      line += toAdd;
+      line += ",-";
       toAdd = "";
     }
     else if(i == data.length() - 1) {
@@ -247,7 +280,7 @@ void recordData(String data) {
   
   if(!SD.exists(filename)){
     logfile = SD.open(filename, FILE_WRITE);
-    logfile.println("Temperature,pH,Specific Conductance,Salinity,DO %Saturation,DO mg/L,ORP,Depth,Battery");
+    logfile.println("Date,Time,Temperature,pH,Specific Conductance,Salinity,DO %Saturation,DO mg/L,ORP,Depth,Battery");
   }
   else {
     logfile = SD.open(filename, FILE_WRITE);
@@ -302,6 +335,7 @@ String requestData() {
   returnResponse += response;
   return returnResponse;
 }
+
 void requestMeasurement() {
   Serial.println("Requesting measurement...");
   bool responded = false;
@@ -386,9 +420,13 @@ void loop() {
     else {
       alarmCount++;
     }
-    setAlarmTime();
+
+    RTC.alarm(ALARM_1);
+    
+    takeMeasurement();
 
     wasCalled = false;
+    setAlarmTime();
   }
 
 }
