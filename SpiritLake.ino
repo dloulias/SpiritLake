@@ -178,25 +178,18 @@ bool getTimes() {
 }
 
 void setAlarmTime() {
+  Serial.print("Setting up alarm for ");
+  Serial.print(alarms[alarmCount].hour);
+  Serial.print(":");
+  Serial.println(alarms[alarmCount].minute);
   RTC.setAlarm(ALM1_MATCH_HOURS, 0, alarms[alarmCount].minute, alarms[alarmCount].hour, 1);
+  //RTC.setAlarm(ALM1_MATCH_HOURS, 0, 57, 13, 1);
   RTC.alarm(ALARM_1);
   RTC.alarmInterrupt(ALARM_1, true);
 }
 
 void alarmISR() {
-  //noInterrupts();
-  wasCalled = true;
-  /*if(alarmCount == numAlarms-1){
-    alarmCount = 0;
-  }
-  else {
-    alarmCount++;
-  }*/
-
-  //setAlarmTime();
-  //takeMeasurement();
-  //interrupts();
-  
+  wasCalled = true;  
 }
 
 void takeMeasurement()
@@ -386,6 +379,15 @@ String decodeResponse()
 void loop() {
   if(wasCalled) {
     Serial.print("Alarm!");
+
+    if(alarmCount == numAlarms-1){
+      alarmCount = 0;
+    }
+    else {
+      alarmCount++;
+    }
+    setAlarmTime();
+
     wasCalled = false;
   }
 
