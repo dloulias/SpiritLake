@@ -1,15 +1,13 @@
 /*
  * Spirit Lake Software
- * Version 1.1
+ * Version 1.2
  * Demetra Loulias and Gabrielle Glynn
  * 
  * Takes readings at set alarm times from preferences CSV.
  * 
  * Still to be done:
- *  - Code clean-up
  *  - Alarm time sorting
  *  - Motor controls (with depth readings and multiple readings per depth)
- *  - Sleeping/Power-Saving
  */
 
 // Struct to hold hour and minute of alarms
@@ -18,6 +16,7 @@ typedef struct {
   int minute;
 } AlarmTime;
 
+#include <LowPower.h>
 #include <SPI.h>
 #include <SD.h>
 #include <ctype.h>
@@ -28,7 +27,7 @@ typedef struct {
 
 #define DATAPIN 10      // SDI-12 pin
 #define CHIPSELECT 53   // Chip select for SD card
-#define ALARM_PIN 2     // Interrupt pin from RTC
+#define ALARM_PIN 18     // Interrupt pin from RTC
 #define MAX_READINGS 5 
 
 AlarmTime alarms[MAX_READINGS]; // Holds all reading times
@@ -91,12 +90,14 @@ void setup() {
   // Disable default square wave of pin
   RTC.squareWave(SQWAVE_NONE);  
   
-  // Attach interrupt to pin
-  pinMode(ALARM_PIN, INPUT_PULLUP); 
-  attachInterrupt(INT0, alarmISR, FALLING);
+  // Set pinmode to input
+  pinMode(ALARM_PIN, INPUT); 
+  
 
   // set first alarm
   setAlarmTime();
+
+  delay(5000);
   
 }
 
@@ -528,6 +529,7 @@ String decodeResponse() {
 }
 
 void loop() {
+  /*
   // check to see if alarm has gone off
   if(wasCalled) {
     Serial.print("Alarm!");
@@ -551,6 +553,36 @@ void loop() {
     
     // set to next alarm
     setAlarmTime();
-  }
+    }
+    */
+
+    attachInterrupt(5, alarmISR, FALLING);
+
+    LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); 
+    detachInterrupt(5);
+    
+    Serial.print("Alarm!");
+
+    // set to next alarm
+    if(alarmCount == numAlarms-1){
+      alarmCount = 0;
+    }
+    else {
+      alarmCount++;
+    }
+
+    // clear alarm flag
+    RTC.alarm(ALARM_1);
+
+    // take measurement from sensor
+    takeMeasurement();
+
+    // clear boolean
+    wasCalled = false;
+    
+    // set to next alarm
+    setAlarmTime();
+    
+    delay(5000);
 
 }
