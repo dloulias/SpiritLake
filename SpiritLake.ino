@@ -10,6 +10,11 @@
  *  - Alarm time sorting
  *  - Motor controls (with depth readings and multiple readings per depth)
  *  - Sleeping/Power-Saving
+ *  - Time validation
+ *  - What if the sensor gets stuck and an alarm comes and goes?
+ *  -Setting the next alarm for closest to current time
+ *  -what if someone takes out the sd card?
+ *  -should we add a power button?
  */
 
 // Struct to hold hour and minute of alarms
@@ -40,8 +45,8 @@ boolean wasCalled = false; // Boolean value for whether or not the alarm has gon
 SDI12 mySDI12(DATAPIN); // Attach SDI-12 communication to data pin.
 
 void setup() {
-  Serial.begin(115200); // Begin serial display
-  mySDI12.begin();  // Begin SDI-12 communication
+  Serial.begin(9600); // Begin serial display
+  //mySDI12.begin();  // Begin SDI-12 communication
   
   Serial.println("Setting up...");
 
@@ -192,7 +197,7 @@ bool getTimes() {
 
   // organizes array into ascending order
   for (i=0; i<(numAlarms - 1); i++) {
-    for (j=j; j<(numAlarms - 1); j++) {
+    for (j=i+1; j<(numAlarms - 1); j++) {
       if (alarms[i].hour > alarms[j].hour) {
         buffer = alarms[i];
         alarms[i] = alarms[j];
@@ -205,8 +210,8 @@ bool getTimes() {
         } else if (alarms[i].minute == alarms[j].minute) {
           //need to add code to get rid of previous equal
           //maybe set to 99:99
-          alarms[j].hour = 99;
-          alarms[i].minute = 99;
+          alarms[j].hour = 25;
+          alarms[j].minute = 25;
           numAlarms--;
         }
       }
