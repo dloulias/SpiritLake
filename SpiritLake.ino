@@ -1,12 +1,11 @@
 /*
  * Spirit Lake Software
- * Version 1.2
+ * Version 1.3
  * Demetra Loulias and Gabrielle Glynn
  * 
  * Takes readings at set alarm times from preferences CSV.
  * 
  * Still to be done:
- *  - Alarm time sorting
  *  - Motor controls (with depth readings and multiple readings per depth)
  */
 
@@ -33,7 +32,7 @@ typedef struct {
 AlarmTime alarms[MAX_READINGS]; // Holds all reading times
 
 int numAlarms;  // Total number of alarms that are set. (Max of 5)
-int alarmCount = 0; // The current alarm the program is on.
+int alarmCount; // The current alarm the program is on.
 boolean wasCalled = false; // Boolean value for whether or not the alarm has gone off.
 
 SDI12 mySDI12(DATAPIN); // Attach SDI-12 communication to data pin.
@@ -133,6 +132,11 @@ void setDefaultAlarms() {
  * @return whether or not the file is the appropriate format.
  */
 bool getTimes() {
+  // buffer for sorting
+  AlarmTime buffer;
+  // counters
+  byte i,j;
+  
   // open config file
   File timeFile = SD.open("config.csv", FILE_READ); 
   
@@ -187,8 +191,62 @@ bool getTimes() {
 
   // set number of alarms to number of alarms counted
   numAlarms = alarmCounter;
+  
+  Serial.println(numAlarms);
+  Serial.println("Sorting...");
+  // organizes array into ascending order
+  for (i=0; i<(alarmCounter); i++) {
+    for (j=i+1; j<(alarmCounter); j++) {
+      
+      Serial.print("i = ");
+      Serial.print(alarms[i].hour);
+      Serial.print(":");
+      Serial.println(alarms[i].minute);
+      Serial.print("j = ");
+      Serial.print(alarms[j].hour);
+      Serial.print(":");
+      Serial.println(alarms[j].minute);
+      
+      if (alarms[i].hour > alarms[j].hour) {
+        buffer = alarms[i];
+        alarms[i] = alarms[j];
+        alarms[j] = buffer;
+      } else if (alarms[i].hour == alarms[j].hour) {
+        if (alarms[i].minute > alarms[j].minute) {
+          buffer = alarms[i];
+          alarms[i] = alarms[j];
+          alarms[j] = buffer;
+        } else if (alarms[i].minute == alarms[j].minute) {
+          //need to add code to get rid of previous equal
+          //maybe set to 99:99
+          alarms[j].hour = 25;
+          alarms[j].minute = 25;
+          numAlarms--;
+        }
+      }
+    }
+  }
 
-  for(int i = 0; i < numAlarms; i++) {
+  // finds soonest alarm time to set
+  time_t currtime = RTC.get();
+  int currHour = hour(currtime);
+  int currMinute = minute(currtime);
+  int nearAlarm;
+ 
+  for(i = 0; i < numAlarms; i++) {
+    Serial.println(i);
+    if(alarms[i].hour > currHour || (alarms[i].hour == currHour && alarms[i].minute > currMinute)) {
+      nearAlarm = i;
+      break;
+    }
+  }
+  
+  Serial.println("NearAlarm");
+  Serial.println(nearAlarm);
+
+  alarmCount = nearAlarm;
+  
+  for(i = 0; i < numAlarms; i++) {
     Serial.print(alarms[i].hour);
     Serial.print(':');
     Serial.println(alarms[i].minute);
