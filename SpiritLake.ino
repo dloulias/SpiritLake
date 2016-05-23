@@ -132,6 +132,9 @@ void setDefaultAlarms() {
  * @return whether or not the file is the appropriate format.
  */
 bool getTimes() {
+  AlarmTime buffer;
+  byte i, j;
+  
   // open config file
   File timeFile = SD.open("config.csv", FILE_READ); 
   
@@ -186,6 +189,29 @@ bool getTimes() {
 
   // set number of alarms to number of alarms counted
   numAlarms = alarmCounter;
+
+  // organizes array into ascending order
+  for (i=0; i<(numAlarms - 1); i++) {
+    for (j=j; j<(numAlarms - 1); j++) {
+      if (alarms[i].hour > alarms[j].hour) {
+        buffer = alarms[i];
+        alarms[i] = alarms[j];
+        alarms[j] = buffer;
+      } else if (alarms[i].hour == alarms[j].hour) {
+        if (alarms[i].minute > alarms[j].minute) {
+          buffer = alarms[i];
+          alarms[i] = alarms[j];
+          alarms[j] = buffer;
+        } else if (alarms[i].minute == alarms[j].minute) {
+          //need to add code to get rid of previous equal
+          //maybe set to 99:99
+          alarms[j].hour = 99;
+          alarms[i].minute = 99;
+          numAlarms--;
+        }
+      }
+    }
+  }
 
   for(int i = 0; i < numAlarms; i++) {
     Serial.print(alarms[i].hour);
