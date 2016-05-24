@@ -151,7 +151,6 @@ bool getTimes() {
   
   while(timeFile.available() && alarmCounter < MAX_READINGS) {
     c = timeFile.read();
-
     // if colon, the previous numbers were hours
     if(c == ':') {
       alarms[alarmCounter].hour = timeAdd.toInt(); 
@@ -171,6 +170,11 @@ bool getTimes() {
     else {
       if(c != '\r') {
         returnBool = false;
+              Serial.println("FAILED1");
+      Serial.println(c, DEC);
+      Serial.println(c);
+      Serial.println("FAILED2");
+      returnBool = false;
         break;
       }
     }
@@ -184,7 +188,11 @@ bool getTimes() {
     alarmCounter++;
   }
   else {
-    if(c != '\r' || c != '\n') {
+    if(c != '\r' && c != '\n' && c != 10) {
+      Serial.println("FAILED1");
+      Serial.println(c, DEC);
+      Serial.println(c);
+      Serial.println("FAILED2");
       returnBool = false;
     }
   }
@@ -196,17 +204,7 @@ bool getTimes() {
   Serial.println("Sorting...");
   // organizes array into ascending order
   for (i=0; i<(alarmCounter); i++) {
-    for (j=i+1; j<(alarmCounter); j++) {
-      
-      Serial.print("i = ");
-      Serial.print(alarms[i].hour);
-      Serial.print(":");
-      Serial.println(alarms[i].minute);
-      Serial.print("j = ");
-      Serial.print(alarms[j].hour);
-      Serial.print(":");
-      Serial.println(alarms[j].minute);
-      
+    for (j=i+1; j<(alarmCounter); j++) {  
       if (alarms[i].hour > alarms[j].hour) {
         buffer = alarms[i];
         alarms[i] = alarms[j];
@@ -591,7 +589,6 @@ void loop() {
   // check to see if alarm has gone off
   if(wasCalled) {
     Serial.print("Alarm!");
-
     // set to next alarm
     if(alarmCount == numAlarms-1){
       alarmCount = 0;
@@ -599,13 +596,10 @@ void loop() {
     else {
       alarmCount++;
     }
-
     // clear alarm flag
     RTC.alarm(ALARM_1);
-
     // take measurement from sensor
     takeMeasurement();
-
     // clear boolean
     wasCalled = false;
     
