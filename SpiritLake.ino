@@ -27,7 +27,7 @@ typedef struct {
 #define DATAPIN 10      // SDI-12 pin
 #define CHIPSELECT 53   // Chip select for SD card
 #define ALARM_PIN 18     // Interrupt pin from RTC
-#define MAX_READINGS 5 
+#define MAX_READINGS 10 
 
 AlarmTime alarms[MAX_READINGS]; // Holds all reading times
 
@@ -265,6 +265,7 @@ void setAlarmTime() {
 
   // set Alarm 1 time
   RTC.setAlarm(ALM1_MATCH_HOURS, 0, alarms[alarmCount].minute, alarms[alarmCount].hour, 1);
+  //RTC.setAlarm(ALM1_MATCH_HOURS, 0, 24, 15, 1);
   // clear RTC flag
   RTC.alarm(ALARM_1);
   // allow interrupt
