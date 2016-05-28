@@ -1,12 +1,14 @@
 /*
  * Spirit Lake Software
- * Version 1.3
+ * Version 1.4
  * Demetra Loulias and Gabrielle Glynn
  * 
  * Takes readings at set alarm times from preferences CSV.
  * 
  * Still to be done:
- *  - Motor controls (with depth readings and multiple readings per depth)
+ *  - Get depth when program is started
+ *  - Make sure that the sensor is actually going down
+ *  - Match depth reading to varible during readings
  */
 
 // Struct to hold hour and minute of alarms
@@ -25,21 +27,28 @@ typedef struct {
 #include <SDI12.h>
 
 #define DATAPIN 10      // SDI-12 pin
+#define UP 12   // Up pin
+#define DOWN 13 // Down pin
 #define CHIPSELECT 53   // Chip select for SD card
 #define ALARM_PIN 18     // Interrupt pin from RTC
 #define MAX_READINGS 10 
+#define MAX_DEPTH 460 // The maximum depth the sensor will go, in meters
 
 AlarmTime alarms[MAX_READINGS]; // Holds all reading times
 
 int numAlarms;  // Total number of alarms that are set. (Max of 5)
 int alarmCount; // The current alarm the program is on.
 boolean wasCalled = false; // Boolean value for whether or not the alarm has gone off.
+boolean motorOn = true; // Boolean value for whether or not the motor should be used
 
 SDI12 mySDI12(DATAPIN); // Attach SDI-12 communication to data pin.
 
 void setup() {
   Serial.begin(115200); // Begin serial display
   mySDI12.begin();  // Begin SDI-12 communication
+  
+  pinMode(UP, OUTPUT);
+  pinMode(DOWN, OUTPUT);
   
   Serial.println("Setting up...");
 
@@ -258,13 +267,15 @@ bool getTimes() {
  * Sets the alarm to the time held in alarmCount.
  */
 void setAlarmTime() {
+  int minuteAlarm = alarms[alarmCount].minute;
+  int hourAlarm = alarms[alarmCount].hour;
   Serial.print("Setting up alarm for ");
   Serial.print(alarms[alarmCount].hour);
   Serial.print(":");
   Serial.println(alarms[alarmCount].minute);
 
   // set Alarm 1 time
-  RTC.setAlarm(ALM1_MATCH_HOURS, 0, alarms[alarmCount].minute, alarms[alarmCount].hour, 1);
+  RTC.setAlarm(ALM1_MATCH_HOURS, 0, minuteAlarm, hourAlarm, 1);
   //RTC.setAlarm(ALM1_MATCH_HOURS, 0, 24, 15, 1);
   // clear RTC flag
   RTC.alarm(ALARM_1);
@@ -279,11 +290,52 @@ void alarmISR() {
   wasCalled = true;  
 }
 
+void takeMeasurementWithMotor() {
+    Serial.println("Taking reading with motor!");
+    boolean measurementCompleted = false;
+    double depth = 0; // **NEED TO GET FROM SENSOR**
+    Serial.print("Length per reading:");
+    double lengthPerReading = MAX_DEPTH/3;
+    Serial.println(lengthPerReading);
+    int readingCount = 0;
+    Serial.print("Time to wait");
+    int timed = ((MAX_DEPTH - depth)/32.6) * 1000;
+    Serial.println(timed);
+
+    // move sensor to bottom of the reading depth
+    digitalWrite(UP,LOW);
+    delay(500);
+    digitalWrite(DOWN, HIGH);
+    delay(timed);
+    digitalWrite(DOWN, LOW);
+    delay(500);
+    depth = MAX_DEPTH - depth; // **NEED TO GET FROM SENSOR** and move motor again if outside of acceptable error range
+    //takeMeasurement();
+    readingCount++;
+    
+    // take readings
+    // ***NEED TO CHECK TO MAKE SURE SENSOR IS GOING THE CORRECT WAY AND THAT THE MOTOR IS MOVING
+    while(!measurementCompleted || readingCount < 4){
+      Serial.print("Time to wait");
+      timed = ((depth - lengthPerReading)/32.6) * 1000;
+      Serial.println(timed);
+      
+      digitalWrite(UP, HIGH);
+      delay(timed);
+      digitalWrite(UP, LOW);
+      delay(500);
+      Serial.println("Current depth:");
+      depth = depth - lengthPerReading;
+      Serial.println(depth);
+      //takeMeasurement();
+      readingCount++;   
+    }
+}
+
 /**
  * Takes measurement from the sensor and stores it to an SD card.
  */
-void takeMeasurement()
-{
+void takeMeasurement() {
     turnOnSensor();
     requestMeasurement();
     String data = requestData();
@@ -628,8 +680,11 @@ void loop() {
     RTC.alarm(ALARM_1);
 
     // take measurement from sensor
-    takeMeasurement();
-
+    if(motorOn) 
+      takeMeasurementWithMotor();
+    else
+      takeMeasurement();
+      
     // clear boolean
     wasCalled = false;
     
