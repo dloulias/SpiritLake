@@ -25,12 +25,23 @@ typedef struct {
 #include <Time.h>             //http://playground.arduino.cc/Code/Time
 #include <Wire.h>             //http://arduino.cc/en/Reference/Wire
 #include <SDI12.h>
+#include "LiquidCrystal.h"
 
+#define D4 4 // LCD D4
+#define D5 5 // LCD D5
+#define D6 6 // LCD D6
+#define D7 7 // LCD D7
+#define RS 8 // LCD RS
+#define E 9 // LCD E
 #define DATAPIN 10      // SDI-12 pin
-#define UP 12   // Up pin
-#define DOWN 13 // Down pin
-#define CHIPSELECT 53   // Chip select for SD card
 #define ALARM_PIN 18     // Interrupt pin from RTC
+#define UP 12   // Up pin (for transistor)
+#define DOWN 13 // Down pin (for transistor)
+#define LCDON 14 // Turns on transistors for LCD
+#define TIMEUP 15 // Button for time up
+#define TIMEDOWN 16 // Button for time down
+#define PROGRAM 17 // Button for program
+#define CHIPSELECT 53   // Chip select for SD card
 #define MAX_READINGS 10 
 #define MAX_DEPTH 460 // The maximum depth the sensor will go, in meters
 
@@ -38,10 +49,13 @@ AlarmTime alarms[MAX_READINGS]; // Holds all reading times
 
 int numAlarms;  // Total number of alarms that are set. (Max of 5)
 int alarmCount; // The current alarm the program is on.
-boolean wasCalled = false; // Boolean value for whether or not the alarm has gone off.
-boolean motorOn = true; // Boolean value for whether or not the motor should be used
+float lowest;  // The lowest point in the water the sensor goes.
+float highest; // The highest point in the water the sensor goes.
+boolean motorOn; // Boolean value for whether or not the motor should be used
+boolean goUp;   // Boolean for whether the motor should take readings going up or down
 
 SDI12 mySDI12(DATAPIN); // Attach SDI-12 communication to data pin.
+LiquidCrystal lcd(RS,E,D4,D5,D6,D7);
 
 void setup() {
   Serial.begin(115200); // Begin serial display
@@ -49,35 +63,144 @@ void setup() {
   
   pinMode(UP, OUTPUT);
   pinMode(DOWN, OUTPUT);
-  
-  Serial.println("Setting up...");
+  pinMode(TIMEUP, INPUT_PULLUP);
+  digitalWrite(TIMEUP, HIGH);
+  pinMode(TIMEDOWN, INPUT_PULLUP);
+  digitalWrite(TIMEDOWN, HIGH);
+  pinMode(PROGRAM, INPUT_PULLUP);
+  digitalWrite(PROGRAM, HIGH);
+  pinMode(LCDON, OUTPUT);
+
+  digitalWrite(LCDON, HIGH);
+  lcd.begin(16,2);
+
+    Serial.println("Setting up...");
 
   // Wait for SD card to be inserted.
   while(!SD.begin(CHIPSELECT)){
-    Serial.println("Card failed.");
+    lcdPrintMessage("    CARD NOT", "    INSERTED ");
+  }
+
+  lcdPrintMessage(" Card Inserted", "");
+  delay(1000);
+  Serial.println("Card loaded.");
+
+  time_t currtime = RTC.get();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Current Time:");
+  lcd.setCursor(0,1);
+  lcd.print(month(currtime));
+  lcd.print("/");
+  lcd.print(day(currtime));
+  lcd.print("/");
+  lcd.print(year(currtime));
+  lcd.print(" ");
+  lcd.print(hour(currtime));
+  lcd.print(":");
+  lcd.print(minute(currtime));
+  delay(3000);
+  
+  int counter = 10;
+  
+  while(true){
+    if(digitalRead(PROGRAM) == LOW){
+      programClock();
+      programDepths();
+      break;  
+    }
+    if(counter == -1) {
+      break;
+    }
+
+    lcdPrintMessage("Starting in...", String(counter));
+    counter--;
+    delay(1000);
   }
   
-  Serial.println("Card loaded.");
+  
+  lcdPrintMessage("    Loading", " preferences...");
+  delay(1000);
   Serial.println("Loading preferences...");
   
   // Read in CSV file containing alarms
   if(SD.exists("config.csv")){
-    Serial.println("Preferences file found.");
     if(!getTimes()) {
       setDefaultAlarms();  // Set to defaults if incorrect format.
       Serial.println("Default times loaded.");
+      lcdPrintMessage("Preferences file", "   not found.");
+      delay(2000);
+      lcdPrintMessage(" Default times", "    loaded.");
     }
     else
-      Serial.println("Times loaded.");
+      lcdPrintMessage("Preferences file", "     found.");
   }
   else{
     setDefaultAlarms(); // Set to defaults if file does not exist
-    Serial.println("Preferences file not found.");
-    Serial.println("Default times loaded");
+    lcdPrintMessage("Preferences file", "   not found.");
+    delay(2000);
+    lcdPrintMessage(" Default times", "    loaded.");
+  }
+
+  delay(2000);
+
+  lcdPrintMessage("Loading", " depths...");
+  delay(2000);
+  if(getHeights()){
+    Serial.println("Moving motor to starting position...");
+    lcdPrintMessage("Moving to start", "  position...");
+    bool startReached = false;
+    
+    int timeDelay = 1000;
+    float diff;
+    float prevDiff;
+    float depth;
+    float prevDepth = 0;
+    
+    while(true) {
+      depth = takeMeasurement(true);
+
+      prevDiff = abs(depth - prevDepth);
+      diff = lowest - depth;
+
+      if(prevDepth != 0) {
+        if(prevDiff < 0.05 || prevDiff == 0.05) {
+          Serial.println("Motor off!");
+          motorOn = false;
+          lcdPrintMessage("Motor error", "");
+          delay(2000);
+          lcdPrintMessage("Operating","without motor.");
+          delay(2000);
+          break;
+        }
+      }
+      else if(diff < 0.1) {
+        goUp = true;
+        motorOn = true;
+        break;
+      }
+      else if(diff < 0.2) {
+        timeDelay = 500;
+      }
+      else if(diff < 0 || diff == 0) {
+          motorOn = false;  
+      }
+      
+
+      prevDepth = depth;
+      digitalWrite(DOWN, HIGH);
+      delay(timeDelay);
+      digitalWrite(DOWN, LOW);
+    }  
+  }
+  else {
+    motorOn = false;
   }
   
+
+
   Serial.print("Current time: ");
-  time_t currtime = RTC.get();
+  currtime = RTC.get();
   Serial.print(month(currtime));
   Serial.print("/");
   Serial.print(day(currtime));
@@ -100,13 +223,277 @@ void setup() {
   
   // Set pinmode to input
   pinMode(ALARM_PIN, INPUT); 
-  
-
+  lcdPrintMessage("Ready to", "start!");
+  digitalWrite(LCDON, LOW);
   // set first alarm
   setAlarmTime();
 
   delay(5000);
   
+}
+
+void programDepths() {
+  float depthHighest;
+  float depthLowest;
+  File depthFile;
+  
+  lcdPrintMessage("Move sensor to", "highest position.");
+  delay(2000);
+  while(true) {
+    if(digitalRead(PROGRAM) == LOW){
+      lcdPrintMessage("Saving...","");
+      float depth1 = takeMeasurement(true);
+      float depth2 = takeMeasurement(true);
+      float depth3 = takeMeasurement(true);
+      
+      depthHighest = (depth1 + depth2 + depth3)/3;
+      Serial.print("Calculated Value:");
+      Serial.println(depthHighest);
+      break;
+    }
+  }
+
+  lcdPrintMessage("Move sensor to", "lowest position.");
+  delay(2000);
+  while(true) {
+    if(digitalRead(PROGRAM) == LOW){
+      lcdPrintMessage("Saving...","");
+      float depth4 = takeMeasurement(true);
+      float depth5 = takeMeasurement(true);
+      float depth6 = takeMeasurement(true);
+
+      depthLowest = (depth4 + depth5 + depth6)/3;
+      Serial.print("Calculated Value:");
+      Serial.println(depthLowest);
+      break;
+    }
+  }
+
+  if(depthHighest > depthLowest) {
+    float temp = depthHighest;
+    depthHighest = depthLowest;
+    depthLowest = temp;
+  }
+
+  if(SD.exists("range.txt")) {
+    Serial.println("EXISTS");
+    SD.remove("range.txt");
+  }
+
+  File myFile = SD.open("range.txt", FILE_WRITE);
+  if(myFile){
+    myFile.println(depthHighest);
+    myFile.println(depthLowest);
+    myFile.close();
+  } 
+  else {
+    Serial.println("error");
+    lcdPrintMessage("error","");
+  }
+  
+  
+  delay(2000);
+}
+
+boolean getHeights() {
+  File depthFile = SD.open("range.txt");
+  int lineNum = 1;
+  String line = "";
+  float depth;
+  
+  if(depthFile) {
+    Serial.println("FOUND!");
+    while(depthFile.available() != 0) {
+      Serial.println("reading...");
+      line = depthFile.readStringUntil('\n');
+      depth = line.toFloat(); // returns 0 if not actually a float
+      Serial.println(line);
+      if(depth == 0) {
+        lcdPrintMessage("Incorrect", "format.");
+        delay(2000);
+        return false;   
+      }
+      else if(lineNum == 1) {
+        highest = depth;
+        lineNum++;
+      }
+      else if(lineNum == 2) {
+        lowest = depth;
+        lineNum++;
+      }
+      else {
+        lcdPrintMessage("Incorrect", "format.");
+        delay(2000);
+        return false;
+      }
+    }
+    Serial.println("Linenum");
+    Serial.println(lineNum);
+    if(lineNum < 3){
+      Serial.println("Incorrect format");
+      lcdPrintMessage("Incorrect", "format.");
+      delay(2000);
+      return false;
+    }
+    else
+      return true;
+  } 
+  else{
+    Serial.println("NOT FOUND!");
+    lcdPrintMessage("Depth file", "not found.");
+    delay(2000);
+    return false;
+  }
+}
+void lcdPrintMessage(String line1, String line2) {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(line1);
+  lcd.setCursor(0,1);
+  lcd.print(line2);
+}
+
+void programClock() {
+  digitalWrite(LCDON, HIGH);
+  lcd.begin(16,2);
+  lcd.setCursor(0,0);
+  lcd.print("Programming");
+  lcd.setCursor(0,1);
+  lcd.print("Mode");
+  
+  Serial.println("Programming clock:");
+  Serial.println("Current time:");
+  
+  delay(1500);
+
+
+  tmElements_t tm;
+  time_t timeSet;
+  
+  time_t currtime = RTC.get();
+  int currMonth = month(currtime);
+  int currDay = day(currtime);
+  int currYear = year(currtime);
+  int currHour = hour(currtime);
+  int currMinute = minute(currtime);
+
+  delay(2000);
+  
+  Serial.print(currMonth);
+  Serial.print("/");
+  Serial.print(currDay);
+  Serial.print("/");
+  Serial.print(currYear);
+  Serial.print(" ");
+  Serial.print(currHour);
+  Serial.print(":");
+  Serial.println(currMinute);
+
+  delay(300);
+
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set month:");
+  lcd.setCursor(0,1);
+  
+  currMonth = getEntry(12, 1, currMonth, "Set Month:");
+  
+  Serial.println("Set day:");
+  currDay = getEntry(31, 1, currDay, "Set Day:");
+
+  Serial.println("Set year");
+  currYear = getEntry(2030, 2016, currYear, "Set year:");
+
+  Serial.println("Set hour:");
+  currHour = getEntry(23, 0, currHour, "Set Hour:");
+
+  Serial.println("Set minute:");
+  currMinute = getEntry(59, 0, currMinute, "Set Minute");
+
+  tm.Month = currMonth;
+  tm.Day = currDay;
+  tm.Year = CalendarYrToTm(currYear);
+  tm.Hour = currHour;
+  tm.Minute = currMinute;
+  tm.Second = 0;
+
+  timeSet = makeTime(tm);
+  RTC.set(timeSet);
+  Serial.println("Time set!");
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Time set!");
+  delay(1000);
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Current Time:");
+  lcd.setCursor(0,1);
+  lcd.print(month(timeSet));
+  lcd.print("/");
+  lcd.print(day(timeSet));
+  lcd.print("/");
+  lcd.print(year(timeSet));
+  lcd.print(" ");
+  lcd.print(hour(timeSet));
+  lcd.print(":");
+  lcd.print(minute(timeSet));
+  delay(3000);
+}
+
+int getEntry(int high, int low, int initialVal, String prompt) {
+  int returnVal = initialVal;
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(prompt);
+  lcd.setCursor(0,1);
+  lcd.print(returnVal);
+  
+  while(true) {
+    if(digitalRead(TIMEUP) == LOW) {
+      if(returnVal < high) {
+        returnVal++;      
+      }
+      else {
+        returnVal = low;
+      }
+      Serial.println(returnVal);
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print(prompt);
+      lcd.setCursor(0,1);
+      lcd.print(returnVal);
+      delay(500);
+    }
+    if(digitalRead(TIMEDOWN) == LOW) {
+      if(returnVal > low) {
+        returnVal--;      
+      }
+      else {
+        returnVal = high;
+      }
+      Serial.println(returnVal);
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print(prompt);
+      lcd.setCursor(0,1);
+      lcd.print(returnVal);
+      delay(500);
+    }
+    if(digitalRead(PROGRAM) == LOW) {
+      delay(300);
+      Serial.println(returnVal);
+      
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print(prompt);
+      lcd.setCursor(0,1);
+      lcd.print(returnVal);
+      
+      break;
+    } 
+  }
+  
+  return returnVal;
 }
 
 /**
@@ -276,7 +663,7 @@ void setAlarmTime() {
 
   // set Alarm 1 time
   RTC.setAlarm(ALM1_MATCH_HOURS, 0, minuteAlarm, hourAlarm, 1);
-  //RTC.setAlarm(ALM1_MATCH_HOURS, 0, 24, 15, 1);
+  //RTC.setAlarm(ALM1_MATCH_HOURS, 0, 59, 15, 1);
   // clear RTC flag
   RTC.alarm(ALARM_1);
   // allow interrupt
@@ -287,60 +674,109 @@ void setAlarmTime() {
  * ISR for when Alarm1 goes off.
  */
 void alarmISR() {
-  wasCalled = true;  
+  
 }
 
 void takeMeasurementWithMotor() {
-    Serial.println("Taking reading with motor!");
-    boolean measurementCompleted = false;
-    double depth = 0; // **NEED TO GET FROM SENSOR**
-    Serial.print("Length per reading:");
-    double lengthPerReading = MAX_DEPTH/3;
-    Serial.println(lengthPerReading);
-    int readingCount = 0;
-    Serial.print("Time to wait");
-    int timed = ((MAX_DEPTH - depth)/32.6) * 1000;
-    Serial.println(timed);
+  int timeDelay;
+  float depth;
+  float prevDepth = 0;
+  float diff;
+  float prevDiff;
+  
+  if(goUp) {
+    Serial.println("Going up!");
+    timeDelay = 1500;
+    while(true) {
+      depth = takeMeasurement(false);
+      diff = depth - highest;
+      prevDiff = abs(prevDepth - depth);
+      
+      Serial.print("Depth:");
+      Serial.println(depth);
+      Serial.print("Diff:");
+      Serial.println(diff);
 
-    // move sensor to bottom of the reading depth
-    digitalWrite(UP,LOW);
-    delay(500);
-    digitalWrite(DOWN, HIGH);
-    delay(timed);
-    digitalWrite(DOWN, LOW);
-    delay(500);
-    depth = MAX_DEPTH - depth; // **NEED TO GET FROM SENSOR** and move motor again if outside of acceptable error range
-    //takeMeasurement();
-    readingCount++;
-    
-    // take readings
-    // ***NEED TO CHECK TO MAKE SURE SENSOR IS GOING THE CORRECT WAY AND THAT THE MOTOR IS MOVING
-    while(!measurementCompleted || readingCount < 4){
-      Serial.print("Time to wait");
-      timed = ((depth - lengthPerReading)/32.6) * 1000;
-      Serial.println(timed);
+      if(prevDepth != 0) {
+        if(prevDepth < 0.05 || prevDiff == 0.05) {
+          motorOn = false;
+          break;
+        }
+      }
+      else if(diff < 0.1) {
+        Serial.println("Top reached!");
+        goUp = false;
+        break;  
+      }
+      else if(diff < 0.2) {
+        Serial.println("Top not reached, try again!");
+        timeDelay = 700;
+      }
+      else if(diff < 0 || diff == 0) {
+        motorOn = false;  
+        break;
+      }
+
+      prevDepth = depth;
       
       digitalWrite(UP, HIGH);
-      delay(timed);
-      digitalWrite(UP, LOW);
-      delay(500);
-      Serial.println("Current depth:");
-      depth = depth - lengthPerReading;
-      Serial.println(depth);
-      //takeMeasurement();
-      readingCount++;   
+      delay(timeDelay);
+      digitalWrite(UP, LOW); 
     }
+  }
+  else {
+    Serial.println("Going down!");
+    timeDelay = 700;
+    while(true) {
+      depth = takeMeasurement(false);
+      diff = lowest - depth;
+      prevDiff = abs(depth - prevDepth);
+
+      if(prevDepth != 0) {
+        if(prevDiff < 0.05 || prevDiff == 0.05) {
+          motorOn = false;
+          break;
+        }
+      }
+      if(diff < 0.1) {
+        Serial.println("Bottom reached!");
+        goUp = true;
+        break;
+      }
+      else if(diff < 0.2) {
+        Serial.println("Bottom not reached, try again");
+        timeDelay = 500;
+      }
+      else if(diff < 0 || diff == 0) {
+        motorOn = false;  
+      }
+
+      digitalWrite(DOWN, HIGH);
+      delay(timeDelay);
+      digitalWrite(DOWN, LOW); 
+    }
+  }
 }
 
 /**
  * Takes measurement from the sensor and stores it to an SD card.
  */
-void takeMeasurement() {
+float takeMeasurement(bool setUp) {
     turnOnSensor();
     requestMeasurement();
     String data = requestData();
-    recordData(data);
+    float depth = 0;
+    
+    if(!setUp)  {
+      recordData(data);
+      
+    }
+
+    depth = getDepth(data); 
+    
     turnOffSensor();
+
+    return depth;
 }
 
 /**
@@ -410,6 +846,40 @@ String parseData(String data) {
   }
 
   return line;
+}
+
+float getDepth(String data) {
+  Serial.println("Getting depth...");
+  Serial.println(data);
+  String depth = "";
+  char c;
+  int measureCount = 1;
+  bool hasStarted = false;
+
+  for(int i = 0; i < data.length(); i++) {
+    c = data.charAt(i);
+    if(measureCount == 9) {
+      if(c == '+' || c == '-') {
+        if(!hasStarted){
+          depth += c;
+          hasStarted = true;
+        }
+        else {
+          break;
+        }
+      }
+      else {
+        depth += c;
+      }
+    }
+    else {
+      if(c == '+' || c == '-'){
+        measureCount++;
+      }
+    }
+  }
+
+  return depth.toFloat();
 }
 
 /**
@@ -638,29 +1108,6 @@ String decodeResponse() {
 }
 
 void loop() {
-  /*
-  // check to see if alarm has gone off
-  if(wasCalled) {
-    Serial.print("Alarm!");
-    // set to next alarm
-    if(alarmCount == numAlarms-1){
-      alarmCount = 0;
-    }
-    else {
-      alarmCount++;
-    }
-    // clear alarm flag
-    RTC.alarm(ALARM_1);
-    // take measurement from sensor
-    takeMeasurement();
-    // clear boolean
-    wasCalled = false;
-    
-    // set to next alarm
-    setAlarmTime();
-    }
-    */
-
     attachInterrupt(5, alarmISR, FALLING);
 
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); 
@@ -678,16 +1125,15 @@ void loop() {
 
     // clear alarm flag
     RTC.alarm(ALARM_1);
-
-    // take measurement from sensor
-    if(motorOn) 
+    Serial.println("ALARM!");
+    if(motorOn) {
+      Serial.println("Taking measurement with motor!");
       takeMeasurementWithMotor();
-    else
-      takeMeasurement();
-      
-    // clear boolean
-    wasCalled = false;
-    
+    }
+    else {
+      takeMeasurement(false);
+    }
+ 
     // set to next alarm
     setAlarmTime();
     
